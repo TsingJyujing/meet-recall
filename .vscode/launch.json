@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:meet-recall}/meetrec",
+      "name": "Debug meetrec (meetrec)",
+      "target": "meetrec",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug meetrec (meetrec)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:meet-recall}/meetrec",
+      "name": "Release meetrec (meetrec)",
+      "target": "meetrec",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release meetrec (meetrec)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:meet-recall}",
+      "name": "Debug meetrec",
+      "target": "meetrec",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug meetrec"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:meet-recall}",
+      "name": "Release meetrec",
+      "target": "meetrec",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release meetrec"
+    }
+  ]
+}
