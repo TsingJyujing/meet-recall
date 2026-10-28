@@ -29,17 +29,49 @@ struct Meetrec: AsyncParsableCommand {
         )
 
         let recordingURL = outputDirectoryURL.appendingPathComponent("speaker.m4a")
-        guard !FileManager.default.fileExists(atPath: recordingURL.path) else {
-            throw ValidationError("Recording already exists: \(recordingURL.path)")
+        let microphoneURL = outputDirectoryURL.appendingPathComponent("mic.m4a")
+        let existingFiles = [recordingURL, microphoneURL]
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard existingFiles.isEmpty else {
+            throw ValidationError(
+                "Recording already exists: \(existingFiles.map(\.path).joined(separator: ", "))"
+            )
         }
 
-        let recorder = SystemAudioRecorder(outputURL: recordingURL)
-        try await recorder.start()
+        let microphoneRecorder = MicrophoneRecorder(outputURL: microphoneURL)
+        try await microphoneRecorder.requestAccess()
+
+        let systemAudioRecorder = SystemAudioRecorder(outputURL: recordingURL)
+        try await systemAudioRecorder.start()
+        do {
+            try microphoneRecorder.start()
+        } catch {
+            await systemAudioRecorder.cancel()
+            throw error
+        }
+
         print("Recording system audio to \(recordingURL.path)")
+        print("Recording microphone to \(microphoneURL.path)")
         print("Press Ctrl+C to stop.")
 
         await TerminationSignalWaiter().wait()
-        try await recorder.stop()
-        print("Saved recording to \(recordingURL.path)")
+
+        async let stopSystemAudio: Void = systemAudioRecorder.stop()
+        var stopErrors: [String] = []
+        do {
+            try microphoneRecorder.stop()
+        } catch {
+            stopErrors.append("microphone: \(error.localizedDescription)")
+        }
+        do {
+            try await stopSystemAudio
+        } catch {
+            stopErrors.append("system audio: \(error.localizedDescription)")
+        }
+        guard stopErrors.isEmpty else {
+            throw ValidationError("Recording stopped with errors: \(stopErrors.joined(separator: "; "))")
+        }
+
+        print("Saved recordings to \(outputDirectoryURL.path)")
     }
 }

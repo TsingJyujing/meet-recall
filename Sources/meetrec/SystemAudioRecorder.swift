@@ -162,6 +162,22 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         }
     }
 
+    func cancel() async {
+        let stream = self.stream
+        self.stream = nil
+        if let stream {
+            try? await stream.stopCapture()
+        }
+
+        sampleQueue.sync {
+            audioInput?.markAsFinished()
+            writer?.cancelWriting()
+            audioInput = nil
+            writer = nil
+        }
+        removeIncompleteOutput()
+    }
+
     private func removeIncompleteOutput() {
         guard FileManager.default.fileExists(atPath: outputURL.path) else { return }
         try? FileManager.default.removeItem(at: outputURL)
