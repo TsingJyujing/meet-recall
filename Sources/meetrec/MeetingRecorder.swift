@@ -78,6 +78,8 @@ actor MeetingRecorder {
 
         do {
             try await microphoneRecorder.requestAccess()
+            let microphoneName = microphoneRecorder.defaultInputDeviceName() ?? "Unknown"
+            print("Using microphone: \(microphoneName)")
             try await systemAudioRecorder.start()
             try microphoneRecorder.start()
             state = .recording

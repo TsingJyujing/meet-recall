@@ -61,6 +61,10 @@ final class MicrophoneRecorder: @unchecked Sendable {
         }
     }
 
+    func defaultInputDeviceName() -> String? {
+        AVCaptureDevice.default(for: .audio)?.localizedName
+    }
+
     func start() throws {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
