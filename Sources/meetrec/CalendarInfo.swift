@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 
 struct CalendarEvent: Equatable, Sendable, Encodable {
     let summary: String
@@ -110,5 +111,36 @@ struct CalendarInfo {
         if let date = formatter.date(from: value) { return date }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+}
+
+actor CalendarInfoStore {
+    private let fileURL: URL
+    private let refreshInterval: TimeInterval
+    private let logger: Logger
+    private var calendarInfo: CalendarInfo
+    private var lastLoadedAt: Date
+
+    init(fileURL: URL, refreshInterval: TimeInterval, logger: Logger) throws {
+        self.fileURL = fileURL
+        self.refreshInterval = refreshInterval
+        self.logger = logger
+        calendarInfo = try CalendarInfo(jsonData: Data(contentsOf: fileURL))
+        lastLoadedAt = Date()
+    }
+
+    func events(at date: Date) -> [CalendarEvent] {
+        if Date().timeIntervalSince(lastLoadedAt) >= refreshInterval {
+            do {
+                calendarInfo = try CalendarInfo(jsonData: Data(contentsOf: fileURL))
+                lastLoadedAt = Date()
+                logger.debug("Reloaded calendar file at \(fileURL.path).")
+            } catch {
+                logger.warning(
+                    "Could not reload calendar file at \(fileURL.path); continuing with cached events: \(error.localizedDescription)"
+                )
+            }
+        }
+        return calendarInfo.events(at: date)
     }
 }

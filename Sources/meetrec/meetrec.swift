@@ -35,6 +35,12 @@ struct Meetrec: AsyncParsableCommand {
     var calendarFile: String?
 
     @Option(
+        name: .customLong("calendar-refresh-interval"),
+        help: "Calendar file reload interval in seconds (default: 600)."
+    )
+    var calendarRefreshInterval = 600
+
+    @Option(
         name: .customLong("log-level"),
         help: "Log level: trace, debug, info, notice, warning, error, or critical (default: INFO)."
     )
@@ -109,16 +115,25 @@ struct Meetrec: AsyncParsableCommand {
         guard (0...65_535).contains(metricsPort) else {
             throw ValidationError("Metrics port must be between 0 and 65535.")
         }
+        guard calendarRefreshInterval > 0 else {
+            throw ValidationError("Calendar refresh interval must be greater than 0 seconds.")
+        }
         try await MicrophoneRecorder.requestAccess()
 
         let outputDirectoryURL = Self.fileURL(for: outputDirectory)
         let calendarFilePath = calendarFile
             ?? ProcessInfo.processInfo.environment["MEETREC_CALENDAR_FILE"]
-        let calendarInfo: CalendarInfo?
+        let calendarInfo: CalendarInfoStore?
         if let calendarFilePath {
             let calendarURL = Self.fileURL(for: calendarFilePath)
-            calendarInfo = try CalendarInfo(jsonData: Data(contentsOf: calendarURL))
-            logger.info("Calendar lookup enabled with \(calendarURL.path)")
+            calendarInfo = try CalendarInfoStore(
+                fileURL: calendarURL,
+                refreshInterval: TimeInterval(calendarRefreshInterval),
+                logger: logger
+            )
+            logger.info(
+                "Calendar lookup enabled with \(calendarURL.path); refresh interval: \(calendarRefreshInterval) seconds."
+            )
         } else {
             calendarInfo = nil
             logger.info("Calendar lookup is disabled; set MEETREC_CALENDAR_FILE or use --calendar-file.")
@@ -213,7 +228,7 @@ struct Meetrec: AsyncParsableCommand {
 
     private static func updateRecordingState(
         monitor: MeetingStatusMonitor,
-        calendarInfo: CalendarInfo?,
+        calendarInfo: CalendarInfoStore?,
         outputDirectoryURL: URL,
         sampleRate: Int,
         recorder: ActiveRecording?,
@@ -236,7 +251,12 @@ struct Meetrec: AsyncParsableCommand {
             guard recorder == nil else { return recorder }
 
             let recordingStart = Date()
-            let matchingEvents = calendarInfo?.events(at: recordingStart) ?? []
+            let matchingEvents: [CalendarEvent]
+            if let calendarInfo {
+                matchingEvents = await calendarInfo.events(at: recordingStart)
+            } else {
+                matchingEvents = []
+            }
             let meeting = matchingEvents.count == 1 ? matchingEvents[0] : nil
             let title = meeting.map { Self.safeFolderTitle($0.summary) } ?? "unknown"
             let folderTime = meeting?.start ?? recordingStart
