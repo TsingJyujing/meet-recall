@@ -43,6 +43,11 @@ struct MeetingStatusMonitor {
         let activeProcesses: [RunningProcess]
     }
 
+    enum MeetingTrigger: String, Codable, Sendable {
+        case zoom
+        case googleChrome = "google_chrome"
+    }
+
     /// Reports activity for the current default input device.
     func microphoneStatus() throws -> MicrophoneStatus {
         let deviceName = AVCaptureDevice.default(for: .audio)?.localizedName
@@ -64,15 +69,19 @@ struct MeetingStatusMonitor {
     }
 
     func isInMeeting(using status: MicrophoneStatus) throws -> Bool {
-        guard status.isActive else { return false }
+        try meetingTrigger(using: status) != nil
+    }
+
+    func meetingTrigger(using status: MicrophoneStatus) throws -> MeetingTrigger? {
+        guard status.isActive else { return nil }
         if status.activeProcesses.contains(where: { $0.name == "zoom.us" }) {
-            return true
+            return .zoom
         }
         guard status.activeProcesses.contains(where: { $0.name.contains("Google Chrome") }) else {
-            return false
+            return nil
         }
         logger.debug("Chrome is using the microphone; checking its tab URLs.")
-        return try hasGoogleMeetURL()
+        return try hasGoogleMeetURL() ? .googleChrome : nil
     }
 
     func hasGoogleMeetURL() throws -> Bool {

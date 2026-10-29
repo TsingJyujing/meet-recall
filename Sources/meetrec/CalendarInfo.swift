@@ -1,6 +1,6 @@
 import Foundation
 
-struct CalendarEvent: Equatable, Sendable {
+struct CalendarEvent: Equatable, Sendable, Encodable {
     let summary: String
     let start: Date
     let end: Date

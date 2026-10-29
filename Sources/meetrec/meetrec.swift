@@ -79,6 +79,11 @@ struct Meetrec: AsyncParsableCommand {
         let continuation: AsyncStream<MonitorEvent>.Continuation
     }
 
+    private struct ActiveRecording: Sendable {
+        let recorder: MeetingRecorder
+        let metadataURL: URL
+    }
+
     private enum MetricsServerError: LocalizedError {
         case stoppedUnexpectedly
 
@@ -211,22 +216,23 @@ struct Meetrec: AsyncParsableCommand {
         calendarInfo: CalendarInfo?,
         outputDirectoryURL: URL,
         sampleRate: Int,
-        recorder: MeetingRecorder?,
+        recorder: ActiveRecording?,
         metrics: MeetrecMetrics?,
         logger: Logger
-    ) async -> MeetingRecorder? {
-        let isInMeeting: Bool
+    ) async -> ActiveRecording? {
+        let trigger: MeetingStatusMonitor.MeetingTrigger?
         do {
             let microphoneStatus = try monitor.microphoneStatus()
             metrics?.updateMicrophone(microphoneStatus.isActive)
-            isInMeeting = try monitor.isInMeeting(using: microphoneStatus)
+            trigger = try monitor.meetingTrigger(using: microphoneStatus)
         } catch {
             logger.warning("Could not determine meeting status: \(error.localizedDescription)")
             return recorder
         }
+        let isInMeeting = trigger != nil
         metrics?.updateMeeting(isInMeeting)
 
-        if isInMeeting {
+        if let trigger {
             guard recorder == nil else { return recorder }
 
             let recordingStart = Date()
@@ -249,6 +255,7 @@ struct Meetrec: AsyncParsableCommand {
             let microphoneURL = sessionDirectory.appendingPathComponent(
                 "\(recordingTime)-mic.m4a"
             )
+            let metadataURL = sessionDirectory.appendingPathComponent("meta.json")
             let newRecorder = MeetingRecorder(
                 speakerOutputURL: speakerURL,
                 microphoneOutputURL: microphoneURL,
@@ -260,12 +267,22 @@ struct Meetrec: AsyncParsableCommand {
                 logger.info(
                     "Recording started. Speaker: \(speakerURL.path), microphone: \(microphoneURL.path)"
                 )
+                do {
+                    try RecordingMetadata.createIfMissing(
+                        at: metadataURL,
+                        trigger: trigger,
+                        startedAt: recordingStart,
+                        calendarEvents: calendarInfo == nil ? nil : matchingEvents
+                    )
+                } catch {
+                    logger.error("Could not create recording metadata: \(error.localizedDescription)")
+                }
                 if calendarInfo != nil, meeting == nil {
                     logger.info(
                         "Calendar lookup matched \(matchingEvents.count) events; using unknown title."
                     )
                 }
-                return newRecorder
+                return ActiveRecording(recorder: newRecorder, metadataURL: metadataURL)
             } catch {
                 logger.error("Could not start recording: \(error.localizedDescription)")
                 return nil
@@ -278,15 +295,20 @@ struct Meetrec: AsyncParsableCommand {
     }
 
     private static func stopRecording(
-        _ recorder: MeetingRecorder,
+        _ recording: ActiveRecording,
         reason: String,
         logger: Logger
     ) async {
         defer { logger.info("Recording ended (\(reason)).") }
         do {
-            try await recorder.stop()
+            try await recording.recorder.stop()
         } catch {
             logger.error("Could not stop recording (\(reason)): \(error.localizedDescription)")
+        }
+        do {
+            try RecordingMetadata.updateEndTime(at: recording.metadataURL, endedAt: Date())
+        } catch {
+            logger.error("Could not update recording end timestamp: \(error.localizedDescription)")
         }
     }
 

@@ -12,6 +12,8 @@ The output directory defaults to `./recordings` and is created when needed. The 
 
 The Prometheus endpoint is disabled by default (`--metrics-port 0`). When enabled, it binds to `127.0.0.1` and exposes `meetrec_in_meeting`, `meetrec_recording`, `meetrec_microphone_active`, and the cumulative `meetrec_recording_starts_total` counter at `/metrics`.
 
+Each recording session directory contains a `meta.json` with the trigger (`zoom` or `google_chrome`), ISO 8601 UTC start and end timestamps, and the matching calendar events. `calendar_events` is `null` when calendar lookup is disabled, and an empty array when enabled but no events match. Existing metadata is preserved at recording start; only `ended_at` is updated when recording stops.
+
 Swift code can hold a recorder and control its lifetime directly:
 
 ```swift
