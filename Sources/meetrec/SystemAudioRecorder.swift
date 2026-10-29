@@ -34,6 +34,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     }
 
     private let outputURL: URL
+    private let sampleRate: Int
     private let sampleQueue = DispatchQueue(label: "meetrec.system-audio")
     private var stream: SCStream?
     private var writer: AVAssetWriter?
@@ -43,11 +44,19 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     private var droppedBuffers = 0
     private var writeFailure: String?
 
-    init(outputURL: URL) {
+    init(outputURL: URL, sampleRate: Int) {
         self.outputURL = outputURL
+        self.sampleRate = sampleRate
     }
 
     func start() async throws {
+        sampleQueue.sync {
+            didStartWriting = false
+            writtenBuffers = 0
+            droppedBuffers = 0
+            writeFailure = nil
+        }
+
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
             onScreenWindowsOnly: true
@@ -64,7 +73,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
         let configuration = SCStreamConfiguration()
         configuration.capturesAudio = true
         configuration.excludesCurrentProcessAudio = true
-        configuration.sampleRate = 48_000
+        configuration.sampleRate = sampleRate
         configuration.channelCount = 2
         configuration.width = 2
         configuration.height = 2
@@ -75,7 +84,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
             mediaType: .audio,
             outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
+                AVSampleRateKey: Double(sampleRate),
                 AVNumberOfChannelsKey: 2,
                 AVEncoderBitRateKey: 192_000,
             ]
@@ -98,6 +107,8 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
             try? await stream.stopCapture()
             sampleQueue.sync {
                 writer.cancelWriting()
+                self.audioInput = nil
+                self.writer = nil
             }
             removeIncompleteOutput()
             throw error

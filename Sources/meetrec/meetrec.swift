@@ -1,10 +1,12 @@
 import ArgumentParser
+import Darwin
+import Dispatch
 import Foundation
 
 @main
 struct Meetrec: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Record system audio from the current macOS output."
+        abstract: "Record system audio and microphone input."
     )
 
     @Option(
@@ -12,6 +14,12 @@ struct Meetrec: AsyncParsableCommand {
         help: "Directory for recorded data (default: ./recordings)."
     )
     var outputDirectory = "./recordings"
+
+    @Option(
+        name: .customLong("sample-rate"),
+        help: "Shared sample rate in Hz for both files (8000–96000, default: 48000)."
+    )
+    var sampleRate = 48_000
 
     mutating func run() async throws {
         let path = (outputDirectory as NSString).expandingTildeInPath
@@ -23,55 +31,34 @@ struct Meetrec: AsyncParsableCommand {
             fileURLWithPath: path,
             relativeTo: workingDirectory
         ).standardizedFileURL
-        try FileManager.default.createDirectory(
-            at: outputDirectoryURL,
-            withIntermediateDirectories: true
-        )
-
-        let recordingURL = outputDirectoryURL.appendingPathComponent("speaker.m4a")
+        let speakerURL = outputDirectoryURL.appendingPathComponent("speaker.m4a")
         let microphoneURL = outputDirectoryURL.appendingPathComponent("mic.m4a")
-        let existingFiles = [recordingURL, microphoneURL]
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard existingFiles.isEmpty else {
-            throw ValidationError(
-                "Recording already exists: \(existingFiles.map(\.path).joined(separator: ", "))"
-            )
-        }
+        let recorder = MeetingRecorder(
+            speakerOutputURL: speakerURL,
+            microphoneOutputURL: microphoneURL,
+            sampleRate: sampleRate
+        )
+        try await recorder.start()
 
-        let microphoneRecorder = MicrophoneRecorder(outputURL: microphoneURL)
-        try await microphoneRecorder.requestAccess()
-
-        let systemAudioRecorder = SystemAudioRecorder(outputURL: recordingURL)
-        try await systemAudioRecorder.start()
-        do {
-            try microphoneRecorder.start()
-        } catch {
-            await systemAudioRecorder.cancel()
-            throw error
-        }
-
-        print("Recording system audio to \(recordingURL.path)")
+        print("Recording system audio to \(speakerURL.path)")
         print("Recording microphone to \(microphoneURL.path)")
         print("Press Ctrl+C to stop.")
 
-        await TerminationSignalWaiter().wait()
-
-        async let stopSystemAudio: Void = systemAudioRecorder.stop()
-        var stopErrors: [String] = []
-        do {
-            try microphoneRecorder.stop()
-        } catch {
-            stopErrors.append("microphone: \(error.localizedDescription)")
-        }
-        do {
-            try await stopSystemAudio
-        } catch {
-            stopErrors.append("system audio: \(error.localizedDescription)")
-        }
-        guard stopErrors.isEmpty else {
-            throw ValidationError("Recording stopped with errors: \(stopErrors.joined(separator: "; "))")
-        }
+        await Self.waitForCtrlC()
+        try await recorder.stop()
 
         print("Saved recordings to \(outputDirectoryURL.path)")
+    }
+
+    private static func waitForCtrlC() async {
+        Darwin.signal(SIGINT, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            source.setEventHandler {
+                source.cancel()
+                continuation.resume()
+            }
+            source.resume()
+        }
     }
 }
