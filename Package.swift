@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "meetrec",
     platforms: [
-        .macOS(.v13)
+        .macOS("14.2")
     ],
     products: [
         .executable(name: "meetrec", targets: ["meetrec"])

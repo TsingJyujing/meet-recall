@@ -1,5 +1,7 @@
+import AVFoundation
 import Logging
 import Testing
+
 @testable import meetrec
 
 enum TestLogging {
@@ -13,6 +15,22 @@ enum TestLogging {
     let logger = TestLogging.logger
     guard #available(macOS 14.2, *) else {
         logger.warning("MeetingStatusMonitor requires macOS 14.2 or later.")
+        return
+    }
+
+    let authorizationStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+    guard authorizationStatus == .authorized else {
+        let statusDescription: String
+        switch authorizationStatus {
+        case .notDetermined: statusDescription = "not determined"
+        case .restricted: statusDescription = "restricted"
+        case .denied: statusDescription = "denied"
+        case .authorized: statusDescription = "authorized"
+        @unknown default: statusDescription = "unknown"
+        }
+        logger.warning(
+            "Microphone access is \(statusDescription). Allow it for the app running swift test in System Settings → Privacy & Security → Microphone."
+        )
         return
     }
 
@@ -31,9 +49,10 @@ enum TestLogging {
                 )
             }
         }
+        logger.info("Checking whether a meeting is active.")
         let isInMeeting = try monitor.isInMeeting()
         logger.info("In meeting: \(isInMeeting)")
     } catch {
-        logger.error("Could not determine meeting status: \(error.localizedDescription)")
+        logger.error("Could not inspect microphone status: \(error.localizedDescription)")
     }
 }

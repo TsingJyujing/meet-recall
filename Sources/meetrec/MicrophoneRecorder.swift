@@ -14,7 +14,7 @@ final class MicrophoneRecorder: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .permissionDenied:
-                return "Microphone access is denied. Allow it for the terminal app in System Settings → Privacy & Security → Microphone."
+                return "Microphone access is denied. Allow it for the app running meetrec in System Settings → Privacy & Security → Microphone."
             case .noInputDevice:
                 return "No microphone input is available."
             case .cannotCreateConverter:
@@ -43,7 +43,7 @@ final class MicrophoneRecorder: @unchecked Sendable {
         self.sampleRate = sampleRate
     }
 
-    func requestAccess() async throws {
+    static func requestAccess() async throws {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             return

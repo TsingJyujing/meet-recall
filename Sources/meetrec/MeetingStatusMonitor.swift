@@ -2,7 +2,9 @@ import AVFoundation
 import AppKit
 import CoreAudio
 import Darwin
+import Dispatch
 import Foundation
+import Logging
 
 @available(macOS 14.2, *)
 struct MeetingStatusMonitor {
@@ -21,12 +23,13 @@ struct MeetingStatusMonitor {
             case .chromeScriptUnavailable:
                 return "Could not create the Google Chrome AppleScript."
             case .chromeAutomationFailed(let message):
-                return "Could not read Google Chrome tabs: \(message)"
+                return "Could not read Google Chrome tabs. Check its Automation permission. Details: \(message)"
             }
         }
     }
 
     private static let googleMeetURLPrefix = "https://meet.google.com/meet/"
+    private let logger = Logger(label: "meetrec.status-monitor")
 
     struct RunningProcess: Hashable, Sendable {
         let processID: pid_t
@@ -65,11 +68,13 @@ struct MeetingStatusMonitor {
         guard status.activeProcesses.contains(where: { $0.name.contains("Google Chrome") }) else {
             return false
         }
+        logger.debug("Chrome is using the microphone; checking its tab URLs.")
         return try hasGoogleMeetURL()
     }
 
     func hasGoogleMeetURL() throws -> Bool {
-        try chromeTabURLs().contains { $0.hasPrefix(Self.googleMeetURLPrefix) }
+        logger.debug("Requesting Google Chrome tab URLs.")
+        return try chromeTabURLs().contains { $0.hasPrefix(Self.googleMeetURLPrefix) }
     }
 
     private func chromeTabURLs() throws -> [String] {
@@ -90,20 +95,28 @@ struct MeetingStatusMonitor {
             return results
         end tell
         """
-        guard let script = NSAppleScript(source: source) else {
-            throw MonitorError.chromeScriptUnavailable
+        let logger = self.logger
+        let executeScript = { () throws -> [String] in
+            guard let script = NSAppleScript(source: source) else {
+                throw MonitorError.chromeScriptUnavailable
+            }
+
+            var error: NSDictionary?
+            logger.debug("Calling NSAppleScript.executeAndReturnError on main thread.")
+            let result = script.executeAndReturnError(&error)
+            logger.debug("NSAppleScript.executeAndReturnError returned.")
+            if let error {
+                throw MonitorError.chromeAutomationFailed(String(describing: error))
+            }
+            return result.numberOfItems > 0
+                ? (1...result.numberOfItems).compactMap { result.atIndex($0)?.stringValue }
+                : []
         }
 
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        if let error {
-            throw MonitorError.chromeAutomationFailed(String(describing: error))
+        if Thread.isMainThread {
+            return try executeScript()
         }
-
-        let tabURLs = result.numberOfItems > 0
-            ? (1...result.numberOfItems).compactMap { result.atIndex($0)?.stringValue }
-            : []
-        return tabURLs
+        return try DispatchQueue.main.sync(execute: executeScript)
     }
 
     private func defaultInputDeviceID() -> AudioDeviceID? {
