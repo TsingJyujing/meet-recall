@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import CoreAudio
 import Darwin
 import Foundation
@@ -8,6 +9,8 @@ struct MeetingStatusMonitor {
     private enum MonitorError: LocalizedError {
         case defaultInputUnavailable
         case processInfoUnavailable
+        case chromeScriptUnavailable
+        case chromeAutomationFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -15,9 +18,15 @@ struct MeetingStatusMonitor {
                 return "No default microphone input device is available."
             case .processInfoUnavailable:
                 return "Could not determine which processes are using the default microphone."
+            case .chromeScriptUnavailable:
+                return "Could not create the Google Chrome AppleScript."
+            case .chromeAutomationFailed(let message):
+                return "Could not read Google Chrome tabs: \(message)"
             }
         }
     }
+
+    private static let googleMeetURLPrefix = "https://meet.google.com/meet/"
 
     struct RunningProcess: Hashable, Sendable {
         let processID: pid_t
@@ -45,6 +54,44 @@ struct MeetingStatusMonitor {
             isActive: !processes.isEmpty,
             activeProcesses: processes
         )
+    }
+
+    func hasGoogleMeetURL() throws -> Bool {
+        try chromeTabURLs().contains { $0.hasPrefix(Self.googleMeetURLPrefix) }
+    }
+
+    private func chromeTabURLs() throws -> [String] {
+        guard !NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.google.Chrome"
+        ).isEmpty else {
+            return []
+        }
+
+        let source = """
+        tell application "Google Chrome"
+            set results to {}
+            repeat with w in windows
+                repeat with t in tabs of w
+                    set end of results to (URL of t)
+                end repeat
+            end repeat
+            return results
+        end tell
+        """
+        guard let script = NSAppleScript(source: source) else {
+            throw MonitorError.chromeScriptUnavailable
+        }
+
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        if let error {
+            throw MonitorError.chromeAutomationFailed(String(describing: error))
+        }
+
+        let tabURLs = result.numberOfItems > 0
+            ? (1...result.numberOfItems).compactMap { result.atIndex($0)?.stringValue }
+            : []
+        return tabURLs
     }
 
     private func defaultInputDeviceID() -> AudioDeviceID? {

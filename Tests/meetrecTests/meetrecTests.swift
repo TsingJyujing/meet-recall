@@ -9,15 +9,16 @@ private enum TestLogging {
     }()
 }
 
-@Test func printCurrentMicrophoneStatus() {
+@Test func printCurrentMeetingStatus() {
     let logger = TestLogging.logger
     guard #available(macOS 14.2, *) else {
         logger.warning("MeetingStatusMonitor requires macOS 14.2 or later.")
         return
     }
 
+    let monitor = MeetingStatusMonitor()
     do {
-        let status = try MeetingStatusMonitor().microphoneStatus()
+        let status = try monitor.microphoneStatus()
         logger.info("Default microphone: \(status.deviceName ?? "Unknown")")
         logger.info("Microphone active: \(status.isActive)")
 
@@ -32,5 +33,12 @@ private enum TestLogging {
         }
     } catch {
         logger.error("Could not read microphone status: \(error.localizedDescription)")
+    }
+
+    do {
+        let hasGoogleMeetURL = try monitor.hasGoogleMeetURL()
+        logger.info("Google Meet tab open in Chrome: \(hasGoogleMeetURL)")
+    } catch {
+        logger.error("Could not read Google Chrome tabs: \(error.localizedDescription)")
     }
 }
