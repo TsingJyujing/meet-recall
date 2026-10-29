@@ -23,6 +23,12 @@ struct Meetrec: AsyncParsableCommand {
     var sampleRate = 48_000
 
     @Option(
+        name: .customLong("metrics-port"),
+        help: "Serve Prometheus metrics on this localhost port (0 disables the server; default: 0)."
+    )
+    var metricsPort = 0
+
+    @Option(
         name: .customLong("calendar-file"),
         help: "Google Calendar JSON export (or set MEETREC_CALENDAR_FILE)."
     )
@@ -65,6 +71,20 @@ struct Meetrec: AsyncParsableCommand {
     private enum MonitorEvent: Sendable {
         case poll
         case stop
+        case metricsServerEnded
+    }
+
+    private struct MonitorEvents: Sendable {
+        let stream: AsyncStream<MonitorEvent>
+        let continuation: AsyncStream<MonitorEvent>.Continuation
+    }
+
+    private enum MetricsServerError: LocalizedError {
+        case stoppedUnexpectedly
+
+        var errorDescription: String? {
+            "Metrics HTTP server stopped unexpectedly."
+        }
     }
 
     private static let monitorInterval = DispatchTimeInterval.seconds(5)
@@ -80,6 +100,9 @@ struct Meetrec: AsyncParsableCommand {
 
         guard (8_000...96_000).contains(sampleRate) else {
             throw ValidationError("Sample rate must be between 8000 and 96000 Hz.")
+        }
+        guard (0...65_535).contains(metricsPort) else {
+            throw ValidationError("Metrics port must be between 0 and 65535.")
         }
         try await MicrophoneRecorder.requestAccess()
 
@@ -97,32 +120,88 @@ struct Meetrec: AsyncParsableCommand {
         }
 
         let monitor = MeetingStatusMonitor()
+        let metrics = metricsPort == 0 ? nil : MeetrecMetrics()
         let events = Self.monitorEvents()
+        let metricsServerTask: Task<Void, Error>?
+        if let metrics {
+            let application = metrics.application(port: metricsPort, logger: logger)
+            logger.info("Starting Prometheus metrics HTTP server on 127.0.0.1:\(metricsPort).")
+            metricsServerTask = Task {
+                do {
+                    try await application.runService(gracefulShutdownSignals: [])
+                    guard !Task.isCancelled else { return }
+                    events.continuation.yield(.metricsServerEnded)
+                    events.continuation.finish()
+                } catch is CancellationError {
+                    if !Task.isCancelled {
+                        events.continuation.yield(.metricsServerEnded)
+                        events.continuation.finish()
+                    }
+                } catch {
+                    events.continuation.yield(.metricsServerEnded)
+                    events.continuation.finish()
+                    throw error
+                }
+            }
+        } else {
+            metricsServerTask = nil
+        }
         logger.info("Monitoring meeting status every 5 seconds.")
 
-        var activeRecorder = await Self.updateRecordingState(
+        let initialRecorder = await Self.updateRecordingState(
             monitor: monitor,
             calendarInfo: calendarInfo,
             outputDirectoryURL: outputDirectoryURL,
             sampleRate: sampleRate,
             recorder: nil,
+            metrics: metrics,
             logger: logger
         )
+        var activeRecorder = initialRecorder
+        metrics?.updateRecording(from: false, to: activeRecorder != nil)
 
-        for await event in events {
-            if case .stop = event { break }
+        var metricsServerStoppedUnexpectedly = false
+        monitorLoop: for await event in events.stream {
+            switch event {
+            case .stop:
+                break monitorLoop
+            case .metricsServerEnded:
+                metricsServerStoppedUnexpectedly = true
+                break monitorLoop
+            case .poll:
+                break
+            }
+            let wasRecording = activeRecorder != nil
             activeRecorder = await Self.updateRecordingState(
                 monitor: monitor,
                 calendarInfo: calendarInfo,
                 outputDirectoryURL: outputDirectoryURL,
                 sampleRate: sampleRate,
                 recorder: activeRecorder,
+                metrics: metrics,
                 logger: logger
             )
+            metrics?.updateRecording(from: wasRecording, to: activeRecorder != nil)
         }
 
+        events.continuation.finish()
         if let activeRecorder {
             await Self.stopRecording(activeRecorder, reason: "monitor stopped", logger: logger)
+        }
+        if let metricsServerTask {
+            if !metricsServerStoppedUnexpectedly {
+                metricsServerTask.cancel()
+            }
+            do {
+                try await metricsServerTask.value
+                if metricsServerStoppedUnexpectedly {
+                    throw MetricsServerError.stoppedUnexpectedly
+                }
+            } catch is CancellationError {
+                if metricsServerStoppedUnexpectedly {
+                    throw MetricsServerError.stoppedUnexpectedly
+                }
+            }
         }
         logger.info("Meeting monitoring stopped.")
     }
@@ -133,15 +212,19 @@ struct Meetrec: AsyncParsableCommand {
         outputDirectoryURL: URL,
         sampleRate: Int,
         recorder: MeetingRecorder?,
+        metrics: MeetrecMetrics?,
         logger: Logger
     ) async -> MeetingRecorder? {
         let isInMeeting: Bool
         do {
-            isInMeeting = try monitor.isInMeeting()
+            let microphoneStatus = try monitor.microphoneStatus()
+            metrics?.updateMicrophone(microphoneStatus.isActive)
+            isInMeeting = try monitor.isInMeeting(using: microphoneStatus)
         } catch {
             logger.warning("Could not determine meeting status: \(error.localizedDescription)")
             return recorder
         }
+        metrics?.updateMeeting(isInMeeting)
 
         if isInMeeting {
             guard recorder == nil else { return recorder }
@@ -207,32 +290,35 @@ struct Meetrec: AsyncParsableCommand {
         }
     }
 
-    private static func monitorEvents() -> AsyncStream<MonitorEvent> {
+    private static func monitorEvents() -> MonitorEvents {
         Darwin.signal(SIGINT, SIG_IGN)
-        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            let queue = DispatchQueue(label: "meetrec.monitor-events")
-            let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: queue)
-            let timerSource = DispatchSource.makeTimerSource(queue: queue)
+        let (stream, continuation) = AsyncStream<MonitorEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        let queue = DispatchQueue(label: "meetrec.monitor-events")
+        let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: queue)
+        let timerSource = DispatchSource.makeTimerSource(queue: queue)
 
-            signalSource.setEventHandler {
-                _ = continuation.yield(.stop)
-                continuation.finish()
-            }
-            timerSource.schedule(
-                deadline: .now() + monitorInterval,
-                repeating: monitorInterval
-            )
-            timerSource.setEventHandler {
-                _ = continuation.yield(.poll)
-            }
-
-            continuation.onTermination = { _ in
-                signalSource.cancel()
-                timerSource.cancel()
-            }
-            signalSource.resume()
-            timerSource.resume()
+        signalSource.setEventHandler {
+            _ = continuation.yield(.stop)
+            continuation.finish()
         }
+        timerSource.schedule(
+            deadline: .now() + monitorInterval,
+            repeating: monitorInterval
+        )
+        timerSource.setEventHandler {
+            _ = continuation.yield(.poll)
+        }
+
+        continuation.onTermination = { _ in
+            signalSource.cancel()
+            timerSource.cancel()
+        }
+        signalSource.resume()
+        timerSource.resume()
+
+        return MonitorEvents(stream: stream, continuation: continuation)
     }
 
     private static func fileURL(for path: String) -> URL {

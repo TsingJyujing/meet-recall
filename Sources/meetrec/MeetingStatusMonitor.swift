@@ -60,7 +60,10 @@ struct MeetingStatusMonitor {
     }
 
     func isInMeeting() throws -> Bool {
-        let status = try microphoneStatus()
+        try isInMeeting(using: microphoneStatus())
+    }
+
+    func isInMeeting(using status: MicrophoneStatus) throws -> Bool {
         guard status.isActive else { return false }
         if status.activeProcesses.contains(where: { $0.name == "zoom.us" }) {
             return true

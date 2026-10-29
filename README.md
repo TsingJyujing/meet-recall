@@ -4,10 +4,13 @@ A mac CLI for record meetings automatically
 ## Run
 
 ```sh
-swift run meetrec --output-dir ./meetings
+swift run meetrec --output-dir ./meetings --metrics-port 9090
+curl http://127.0.0.1:9090/metrics
 ```
 
 The output directory defaults to `./recordings` and is created when needed. The CLI records the macOS system audio mix to `speaker.m4a` and the microphone to `mic.m4a`; press Ctrl+C to finalize both files and stop. It does not overwrite existing recordings. Use `--sample-rate 44100` to set one rate for both files; valid values are 8000–96000 Hz and the default is 48000 Hz.
+
+The Prometheus endpoint is disabled by default (`--metrics-port 0`). When enabled, it binds to `127.0.0.1` and exposes `meetrec_in_meeting`, `meetrec_recording`, `meetrec_microphone_active`, and the cumulative `meetrec_recording_starts_total` counter at `/metrics`.
 
 Swift code can hold a recorder and control its lifetime directly:
 
