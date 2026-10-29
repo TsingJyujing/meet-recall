@@ -56,6 +56,18 @@ struct MeetingStatusMonitor {
         )
     }
 
+    func isInMeeting() throws -> Bool {
+        let status = try microphoneStatus()
+        guard status.isActive else { return false }
+        if status.activeProcesses.contains(where: { $0.name == "zoom.us" }) {
+            return true
+        }
+        guard status.activeProcesses.contains(where: { $0.name.contains("Google Chrome") }) else {
+            return false
+        }
+        return try hasGoogleMeetURL()
+    }
+
     func hasGoogleMeetURL() throws -> Bool {
         try chromeTabURLs().contains { $0.hasPrefix(Self.googleMeetURLPrefix) }
     }

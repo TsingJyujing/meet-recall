@@ -31,14 +31,9 @@ private enum TestLogging {
                 )
             }
         }
+        let isInMeeting = try monitor.isInMeeting()
+        logger.info("In meeting: \(isInMeeting)")
     } catch {
-        logger.error("Could not read microphone status: \(error.localizedDescription)")
-    }
-
-    do {
-        let hasGoogleMeetURL = try monitor.hasGoogleMeetURL()
-        logger.info("Google Meet tab open in Chrome: \(hasGoogleMeetURL)")
-    } catch {
-        logger.error("Could not read Google Chrome tabs: \(error.localizedDescription)")
+        logger.error("Could not determine meeting status: \(error.localizedDescription)")
     }
 }
