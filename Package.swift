@@ -6,10 +6,10 @@ import PackageDescription
 let package = Package(
     name: "meetrec",
     platforms: [
-        .macOS(.v13),
+        .macOS(.v13)
     ],
     products: [
-        .executable(name: "meetrec", targets: ["meetrec"]),
+        .executable(name: "meetrec", targets: ["meetrec"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
@@ -25,14 +25,17 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
             ],
             swiftSettings: [
-                .enableUpcomingFeature("ApproachableConcurrency"),
+                .enableUpcomingFeature("ApproachableConcurrency")
             ],
         ),
         .testTarget(
             name: "meetrecTests",
-            dependencies: ["meetrec"],
+            dependencies: [
+                "meetrec",
+                .product(name: "Logging", package: "swift-log"),
+            ],
             swiftSettings: [
-                .enableUpcomingFeature("ApproachableConcurrency"),
+                .enableUpcomingFeature("ApproachableConcurrency")
             ],
         ),
     ]

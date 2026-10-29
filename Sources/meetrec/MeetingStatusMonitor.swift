@@ -1,0 +1,217 @@
+import AVFoundation
+import CoreAudio
+import Darwin
+import Foundation
+
+@available(macOS 14.2, *)
+struct MeetingStatusMonitor {
+    private enum MonitorError: LocalizedError {
+        case defaultInputUnavailable
+        case processInfoUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .defaultInputUnavailable:
+                return "No default microphone input device is available."
+            case .processInfoUnavailable:
+                return "Could not determine which processes are using the default microphone."
+            }
+        }
+    }
+
+    struct RunningProcess: Hashable, Sendable {
+        let processID: pid_t
+        let name: String
+        let executablePath: String?
+    }
+
+    struct MicrophoneStatus: Sendable {
+        let deviceName: String?
+        let isActive: Bool
+        let activeProcesses: [RunningProcess]
+    }
+
+    /// Reports activity for the current default input device.
+    func microphoneStatus() throws -> MicrophoneStatus {
+        let deviceName = AVCaptureDevice.default(for: .audio)?.localizedName
+        guard let deviceID = defaultInputDeviceID() else {
+            throw MonitorError.defaultInputUnavailable
+        }
+        guard let processes = activeInputProcesses(using: deviceID) else {
+            throw MonitorError.processInfoUnavailable
+        }
+        return MicrophoneStatus(
+            deviceName: deviceName,
+            isActive: !processes.isEmpty,
+            activeProcesses: processes
+        )
+    }
+
+    private func defaultInputDeviceID() -> AudioDeviceID? {
+        var address = propertyAddress(kAudioHardwarePropertyDefaultInputDevice)
+        var deviceID = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        ) == noErr, deviceID != AudioDeviceID(kAudioObjectUnknown) else {
+            return nil
+        }
+        return deviceID
+    }
+
+    private func activeInputProcesses(using deviceID: AudioDeviceID) -> [RunningProcess]? {
+        guard let processObjects = readAudioObjectIDs(
+            AudioObjectID(kAudioObjectSystemObject),
+            selector: kAudioHardwarePropertyProcessObjectList
+        ) else {
+            return nil
+        }
+
+        var activeProcesses: [RunningProcess] = []
+        for processObject in processObjects {
+            guard let isRunningInput = readUInt32(
+                processObject,
+                selector: kAudioProcessPropertyIsRunningInput
+            ) else {
+                return nil
+            }
+            guard isRunningInput != 0 else { continue }
+            guard let devices = readAudioObjectIDs(
+                processObject,
+                selector: kAudioProcessPropertyDevices,
+                scope: kAudioObjectPropertyScopeInput
+            ) else {
+                return nil
+            }
+            guard devices.contains(AudioObjectID(deviceID)) else { continue }
+            guard let processID = readProcessID(processObject),
+                  let process = runningProcess(for: processID)
+            else {
+                return nil
+            }
+            activeProcesses.append(process)
+        }
+        return activeProcesses
+    }
+
+    private func readProcessID(_ processObject: AudioObjectID) -> pid_t? {
+        var address = propertyAddress(kAudioProcessPropertyPID)
+        var processID: pid_t = 0
+        var size = UInt32(MemoryLayout<pid_t>.size)
+        guard AudioObjectGetPropertyData(
+            processObject,
+            &address,
+            0,
+            nil,
+            &size,
+            &processID
+        ) == noErr, processID > 0 else {
+            return nil
+        }
+        return processID
+    }
+
+    private func readUInt32(
+        _ objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+    ) -> UInt32? {
+        var address = propertyAddress(selector, scope: scope)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(
+            objectID,
+            &address,
+            0,
+            nil,
+            &size,
+            &value
+        ) == noErr else {
+            return nil
+        }
+        return value
+    }
+
+    private func readAudioObjectIDs(
+        _ objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+    ) -> [AudioObjectID]? {
+        var address = propertyAddress(selector, scope: scope)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size) == noErr,
+              size % UInt32(MemoryLayout<AudioObjectID>.stride) == 0
+        else {
+            return nil
+        }
+        guard size > 0 else { return [] }
+
+        var objectIDs = [AudioObjectID](
+            repeating: AudioObjectID(kAudioObjectUnknown),
+            count: Int(size) / MemoryLayout<AudioObjectID>.stride
+        )
+        let status = objectIDs.withUnsafeMutableBufferPointer { buffer in
+            AudioObjectGetPropertyData(
+                objectID,
+                &address,
+                0,
+                nil,
+                &size,
+                buffer.baseAddress!
+            )
+        }
+        guard status == noErr else { return nil }
+        return Array(objectIDs.prefix(Int(size) / MemoryLayout<AudioObjectID>.stride))
+    }
+
+    private func propertyAddress(
+        _ selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+    ) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
+    private func runningProcess(for processID: pid_t) -> RunningProcess? {
+        let path = executablePath(for: processID)
+        guard let name = path.map({ URL(fileURLWithPath: $0).lastPathComponent })
+                ?? processName(for: processID)
+        else {
+            return nil
+        }
+        return RunningProcess(processID: processID, name: name, executablePath: path)
+    }
+
+    private func executablePath(for processID: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        let length = buffer.withUnsafeMutableBufferPointer {
+            proc_pidpath(processID, $0.baseAddress, UInt32($0.count))
+        }
+        guard length > 0 else { return nil }
+        return decodeCString(buffer)
+    }
+
+    private func processName(for processID: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 256)
+        let length = buffer.withUnsafeMutableBufferPointer {
+            proc_name(processID, $0.baseAddress, UInt32($0.count))
+        }
+        guard length > 0 else { return nil }
+        return decodeCString(buffer)
+    }
+
+    private func decodeCString(_ buffer: [CChar]) -> String {
+        String(
+            decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) },
+            as: UTF8.self
+        )
+    }
+}
