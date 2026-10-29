@@ -2,7 +2,7 @@ import Logging
 import Testing
 @testable import meetrec
 
-private enum TestLogging {
+enum TestLogging {
     static let logger: Logger = {
         LoggingSystem.bootstrap(StreamLogHandler.standardOutput)
         return Logger(label: "meetrec.status-test")
