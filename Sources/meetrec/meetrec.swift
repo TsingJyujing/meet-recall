@@ -2,6 +2,7 @@ import ArgumentParser
 import Darwin
 import Dispatch
 import Foundation
+import Logging
 
 @main
 struct Meetrec: AsyncParsableCommand {
@@ -22,6 +23,9 @@ struct Meetrec: AsyncParsableCommand {
     var sampleRate = 48_000
 
     mutating func run() async throws {
+        LoggingSystem.bootstrap(StreamLogHandler.standardError)
+        let logger = Logger(label: "meetrec")
+
         let path = (outputDirectory as NSString).expandingTildeInPath
         let workingDirectory = URL(
             fileURLWithPath: FileManager.default.currentDirectoryPath,
@@ -40,14 +44,14 @@ struct Meetrec: AsyncParsableCommand {
         )
         try await recorder.start()
 
-        print("Recording system audio to \(speakerURL.path)")
-        print("Recording microphone to \(microphoneURL.path)")
-        print("Press Ctrl+C to stop.")
+        logger.info("Recording system audio to \(speakerURL.path)")
+        logger.info("Recording microphone to \(microphoneURL.path)")
+        logger.info("Press Ctrl+C to stop.")
 
         await Self.waitForCtrlC()
         try await recorder.stop()
 
-        print("Saved recordings to \(outputDirectoryURL.path)")
+        logger.info("Saved recordings to \(outputDirectoryURL.path)")
     }
 
     private static func waitForCtrlC() async {

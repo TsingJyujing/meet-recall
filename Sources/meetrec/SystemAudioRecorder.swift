@@ -2,6 +2,7 @@ import AVFoundation
 import AudioToolbox
 import CoreMedia
 import Foundation
+import Logging
 import ScreenCaptureKit
 
 final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
@@ -35,6 +36,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
     private let outputURL: URL
     private let sampleRate: Int
+    private let logger = Logger(label: "meetrec.system-audio")
     private let sampleQueue = DispatchQueue(label: "meetrec.system-audio")
     private var stream: SCStream?
     private var writer: AVAssetWriter?
@@ -164,9 +166,7 @@ final class SystemAudioRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
             )
         }
         if state.droppedBuffers > 0 {
-            FileHandle.standardError.write(
-                Data("warning: dropped \(state.droppedBuffers) audio buffers while recording.\n".utf8)
-            )
+            logger.warning("Dropped \(state.droppedBuffers) audio buffers while recording.")
         }
         if let captureStopError {
             throw captureStopError

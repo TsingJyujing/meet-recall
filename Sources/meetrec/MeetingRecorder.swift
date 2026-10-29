@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 
 /// Coordinates system-audio and microphone capture into separate M4A files.
 /// Keep a strong reference to the recorder until `stop()` completes.
@@ -21,17 +22,17 @@ actor MeetingRecorder {
 
         var errorDescription: String? {
             switch self {
-            case let .invalidState(message):
+            case .invalidState(let message):
                 return message
-            case let .invalidSampleRate(sampleRate):
+            case .invalidSampleRate(let sampleRate):
                 return "Sample rate must be between 8000 and 96000 Hz; got \(sampleRate)."
             case .outputPathsMustBeDifferent:
                 return "Speaker and microphone recordings must use different output paths."
-            case let .outputMustBeM4A(path):
+            case .outputMustBeM4A(let path):
                 return "Recording output must use the .m4a extension: \(path)"
-            case let .existingFiles(paths):
+            case .existingFiles(let paths):
                 return "Refusing to overwrite existing recordings: \(paths.joined(separator: ", "))"
-            case let .stopFailed(errors):
+            case .stopFailed(let errors):
                 return "Failed to finalize recordings: \(errors.joined(separator: "; "))"
             }
         }
@@ -42,6 +43,7 @@ actor MeetingRecorder {
     private let sampleRate: Int
     private let systemAudioRecorder: SystemAudioRecorder
     private let microphoneRecorder: MicrophoneRecorder
+    private let logger = Logger(label: "meetrec.recorder")
     private var state = State.idle
 
     init(
@@ -79,7 +81,7 @@ actor MeetingRecorder {
         do {
             try await microphoneRecorder.requestAccess()
             let microphoneName = microphoneRecorder.defaultInputDeviceName() ?? "Unknown"
-            print("Using microphone: \(microphoneName)")
+            logger.info("Using microphone: \(microphoneName)")
             try await systemAudioRecorder.start()
             try microphoneRecorder.start()
             state = .recording

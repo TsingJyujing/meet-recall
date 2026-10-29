@@ -12,6 +12,10 @@ The output directory defaults to `./recordings` and is created when needed. The 
 Swift code can hold a recorder and control its lifetime directly:
 
 ```swift
+import Logging
+
+LoggingSystem.bootstrap(StreamLogHandler.standardError)
+
 let recorder = MeetingRecorder(
     speakerOutputURL: URL(fileURLWithPath: "recordings/speaker.m4a"),
     microphoneOutputURL: URL(fileURLWithPath: "recordings/mic.m4a"),
@@ -24,5 +28,7 @@ await monitorMeetings()
 
 try await recorder.stop()
 ```
+
+The CLI sends swift-log output to standard error. An application embedding the recorder should bootstrap its preferred swift-log handler once before starting a recorder.
 
 Recording requires macOS 13 or later and Screen & System Audio Recording plus Microphone permission for the terminal app running the CLI. Grant access in System Settings → Privacy & Security → Screen & System Audio Recording and Microphone. The two files are captured separately and are not yet guaranteed to be sample-accurately synchronized.
