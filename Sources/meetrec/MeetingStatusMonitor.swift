@@ -44,6 +44,7 @@ struct MeetingStatusMonitor {
     }
 
     enum MeetingTrigger: String, Codable, Sendable {
+        case microphone
         case zoom
         case googleChrome = "google_chrome"
     }
@@ -57,23 +58,31 @@ struct MeetingStatusMonitor {
         guard let processes = activeInputProcesses(using: deviceID) else {
             throw MonitorError.processInfoUnavailable
         }
+        let externalProcesses = processes.filter { $0.processID != getpid() }
         return MicrophoneStatus(
             deviceName: deviceName,
-            isActive: !processes.isEmpty,
-            activeProcesses: processes
+            isActive: !externalProcesses.isEmpty,
+            activeProcesses: externalProcesses
         )
     }
 
-    func isInMeeting() throws -> Bool {
-        try isInMeeting(using: microphoneStatus())
+    func isInMeeting(detectApp: Bool = false) throws -> Bool {
+        try isInMeeting(using: microphoneStatus(), detectApp: detectApp)
     }
 
-    func isInMeeting(using status: MicrophoneStatus) throws -> Bool {
-        try meetingTrigger(using: status) != nil
+    func isInMeeting(
+        using status: MicrophoneStatus,
+        detectApp: Bool = false
+    ) throws -> Bool {
+        try meetingTrigger(using: status, detectApp: detectApp) != nil
     }
 
-    func meetingTrigger(using status: MicrophoneStatus) throws -> MeetingTrigger? {
+    func meetingTrigger(
+        using status: MicrophoneStatus,
+        detectApp: Bool = false
+    ) throws -> MeetingTrigger? {
         guard status.isActive else { return nil }
+        guard detectApp else { return .microphone }
         if status.activeProcesses.contains(where: { $0.name == "zoom.us" }) {
             return .zoom
         }

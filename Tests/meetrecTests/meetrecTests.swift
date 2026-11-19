@@ -49,10 +49,37 @@ enum TestLogging {
                 )
             }
         }
-        logger.info("Checking whether a meeting is active.")
-        let isInMeeting = try monitor.isInMeeting()
-        logger.info("In meeting: \(isInMeeting)")
+        let trigger = try monitor.meetingTrigger(using: status, detectApp: false)
+        logger.info("In meeting (microphone-only detection): \(trigger != nil)")
     } catch {
         logger.error("Could not inspect microphone status: \(error.localizedDescription)")
     }
+}
+
+@Test func microphoneOnlyTriggerUsesMicrophoneActivity() throws {
+    guard #available(macOS 14.2, *) else { return }
+
+    let monitor = MeetingStatusMonitor()
+    let activeStatus = MeetingStatusMonitor.MicrophoneStatus(
+        deviceName: "Test microphone",
+        isActive: true,
+        activeProcesses: [
+            MeetingStatusMonitor.RunningProcess(
+                processID: 123,
+                name: "Google Chrome Helper",
+                executablePath: nil
+            )
+        ]
+    )
+    let inactiveStatus = MeetingStatusMonitor.MicrophoneStatus(
+        deviceName: "Test microphone",
+        isActive: false,
+        activeProcesses: []
+    )
+
+    let activeTrigger = try monitor.meetingTrigger(using: activeStatus, detectApp: false)
+    let inactiveTrigger = try monitor.meetingTrigger(using: inactiveStatus, detectApp: false)
+
+    #expect(activeTrigger?.rawValue == "microphone")
+    #expect(inactiveTrigger == nil)
 }

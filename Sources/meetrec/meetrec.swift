@@ -46,6 +46,12 @@ struct Meetrec: AsyncParsableCommand {
     )
     var logLevel: LogLevelOption = .info
 
+    @Flag(
+        name: .customLong("detect-app"),
+        help: "Require Zoom or a Google Meet Chrome tab before recording (default: disabled)."
+    )
+    var detectApp = false
+
     enum LogLevelOption: String, ExpressibleByArgument {
         case trace
         case debug
@@ -138,6 +144,7 @@ struct Meetrec: AsyncParsableCommand {
             calendarInfo = nil
             logger.info("Calendar lookup is disabled; set MEETREC_CALENDAR_FILE or use --calendar-file.")
         }
+        logger.info("Application detection is \(detectApp ? "enabled" : "disabled").")
 
         let monitor = MeetingStatusMonitor()
         let metrics = metricsPort == 0 ? nil : MeetrecMetrics()
@@ -173,6 +180,7 @@ struct Meetrec: AsyncParsableCommand {
             calendarInfo: calendarInfo,
             outputDirectoryURL: outputDirectoryURL,
             sampleRate: sampleRate,
+            detectApp: detectApp,
             recorder: nil,
             metrics: metrics,
             logger: logger
@@ -197,6 +205,7 @@ struct Meetrec: AsyncParsableCommand {
                 calendarInfo: calendarInfo,
                 outputDirectoryURL: outputDirectoryURL,
                 sampleRate: sampleRate,
+                detectApp: detectApp,
                 recorder: activeRecorder,
                 metrics: metrics,
                 logger: logger
@@ -231,6 +240,7 @@ struct Meetrec: AsyncParsableCommand {
         calendarInfo: CalendarInfoStore?,
         outputDirectoryURL: URL,
         sampleRate: Int,
+        detectApp: Bool,
         recorder: ActiveRecording?,
         metrics: MeetrecMetrics?,
         logger: Logger
@@ -239,7 +249,10 @@ struct Meetrec: AsyncParsableCommand {
         do {
             let microphoneStatus = try monitor.microphoneStatus()
             metrics?.updateMicrophone(microphoneStatus.isActive)
-            trigger = try monitor.meetingTrigger(using: microphoneStatus)
+            trigger = try monitor.meetingTrigger(
+                using: microphoneStatus,
+                detectApp: detectApp
+            )
         } catch {
             logger.warning("Could not determine meeting status: \(error.localizedDescription)")
             return recorder
