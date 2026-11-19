@@ -47,10 +47,10 @@ struct Meetrec: AsyncParsableCommand {
     var logLevel: LogLevelOption = .info
 
     @Flag(
-        name: .customLong("detect-app"),
-        help: "Require Zoom or a Google Meet Chrome tab before recording (default: disabled)."
+        name: .customLong("detect-tab"),
+        help: "Require Google Chrome to have a Google Meet tab before recording (default: disabled)."
     )
-    var detectApp = false
+    var detectTab = false
 
     enum LogLevelOption: String, ExpressibleByArgument {
         case trace
@@ -144,7 +144,7 @@ struct Meetrec: AsyncParsableCommand {
             calendarInfo = nil
             logger.info("Calendar lookup is disabled; set MEETREC_CALENDAR_FILE or use --calendar-file.")
         }
-        logger.info("Application detection is \(detectApp ? "enabled" : "disabled").")
+        logger.info("Chrome Tab detection is \(detectTab ? "enabled" : "disabled").")
 
         let monitor = MeetingStatusMonitor()
         let metrics = metricsPort == 0 ? nil : MeetrecMetrics()
@@ -180,7 +180,7 @@ struct Meetrec: AsyncParsableCommand {
             calendarInfo: calendarInfo,
             outputDirectoryURL: outputDirectoryURL,
             sampleRate: sampleRate,
-            detectApp: detectApp,
+            detectTab: detectTab,
             recorder: nil,
             metrics: metrics,
             logger: logger
@@ -205,7 +205,7 @@ struct Meetrec: AsyncParsableCommand {
                 calendarInfo: calendarInfo,
                 outputDirectoryURL: outputDirectoryURL,
                 sampleRate: sampleRate,
-                detectApp: detectApp,
+                detectTab: detectTab,
                 recorder: activeRecorder,
                 metrics: metrics,
                 logger: logger
@@ -240,7 +240,7 @@ struct Meetrec: AsyncParsableCommand {
         calendarInfo: CalendarInfoStore?,
         outputDirectoryURL: URL,
         sampleRate: Int,
-        detectApp: Bool,
+        detectTab: Bool,
         recorder: ActiveRecording?,
         metrics: MeetrecMetrics?,
         logger: Logger
@@ -251,7 +251,7 @@ struct Meetrec: AsyncParsableCommand {
             metrics?.updateMicrophone(microphoneStatus.isActive)
             trigger = try monitor.meetingTrigger(
                 using: microphoneStatus,
-                detectApp: detectApp
+                detectTab: detectTab
             )
         } catch {
             logger.warning("Could not determine meeting status: \(error.localizedDescription)")

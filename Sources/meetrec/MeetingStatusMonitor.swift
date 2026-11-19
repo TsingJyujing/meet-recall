@@ -44,7 +44,6 @@ struct MeetingStatusMonitor {
     }
 
     enum MeetingTrigger: String, Codable, Sendable {
-        case microphone
         case zoom
         case googleChrome = "google_chrome"
     }
@@ -66,29 +65,29 @@ struct MeetingStatusMonitor {
         )
     }
 
-    func isInMeeting(detectApp: Bool = false) throws -> Bool {
-        try isInMeeting(using: microphoneStatus(), detectApp: detectApp)
+    func isInMeeting(detectTab: Bool = false) throws -> Bool {
+        try isInMeeting(using: microphoneStatus(), detectTab: detectTab)
     }
 
     func isInMeeting(
         using status: MicrophoneStatus,
-        detectApp: Bool = false
+        detectTab: Bool = false
     ) throws -> Bool {
-        try meetingTrigger(using: status, detectApp: detectApp) != nil
+        try meetingTrigger(using: status, detectTab: detectTab) != nil
     }
 
     func meetingTrigger(
         using status: MicrophoneStatus,
-        detectApp: Bool = false
+        detectTab: Bool = false
     ) throws -> MeetingTrigger? {
         guard status.isActive else { return nil }
-        guard detectApp else { return .microphone }
         if status.activeProcesses.contains(where: { $0.name == "zoom.us" }) {
             return .zoom
         }
         guard status.activeProcesses.contains(where: { $0.name.contains("Google Chrome") }) else {
             return nil
         }
+        guard detectTab else { return .googleChrome }
         logger.debug("Chrome is using the microphone; checking its tab URLs.")
         return try hasGoogleMeetURL() ? .googleChrome : nil
     }

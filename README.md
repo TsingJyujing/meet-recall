@@ -53,7 +53,7 @@ swift run meetrec \
 | `--calendar-file <path>` | 未设置 | 指定 Google Calendar JSON 文件。命令行参数优先；未提供时读取 `MEETREC_CALENDAR_FILE`。 |
 | `--calendar-refresh-interval <seconds>` | `600` | 日历文件自动刷新间隔，单位为秒，必须大于 `0`。仅在启用日历查询时有实际作用。 |
 | `--log-level <level>` | `info` | 日志等级：`trace`、`debug`、`info`、`notice`、`warning`、`error` 或 `critical`。日志写入标准错误。 |
-| `--detect-app` | 关闭 | 启用 Zoom 进程和 Google Chrome Meet Tab 检测；启用后只有检测到对应应用时才开始录音。 |
+| `--detect-tab` | 关闭 | 启用 Google Chrome Meet Tab 检测。Zoom 和 Google Chrome 进程过滤始终执行；启用后 Chrome 还必须打开 Google Meet Tab。 |
 | `-h`, `--help` | — | 显示命令帮助。 |
 
 启用 metrics 后，可通过以下地址读取数据：
@@ -70,10 +70,12 @@ curl http://127.0.0.1:9090/metrics
 
 程序启动后立即检查一次会议状态，之后每 5 秒检查一次。`MeetingStatusMonitor` 先检查当前默认输入设备的活跃状态，再读取正在使用该设备的进程信息，并排除录音器自身的输入流。录音和会议判定都针对默认麦克风；开始录音前会在日志中输出麦克风名称。
 
-默认情况下，只要默认麦克风有活跃输入就开始录音，`meta.json` 的 `trigger` 为 `microphone`。传入 `--detect-app` 后，默认麦克风还需要满足以下应用条件之一：
+默认情况下，默认麦克风有活跃输入且占用进程符合以下条件之一时开始录音：
 
 - 使用麦克风的进程名称为 `zoom.us`，触发类型为 Zoom。
-- 使用麦克风的进程名称包含 `Google Chrome`，且 Chrome 某个 Tab 的 URL 以 `https://meet.google.com/meet/` 开头，触发类型为 Google Chrome。Tab URL 通过主线程上的 `NSAppleScript.executeAndReturnError` 获取。
+- 使用麦克风的进程名称包含 `Google Chrome`，触发类型为 Google Chrome。
+
+传入 `--detect-tab` 后，Google Chrome 进程还必须存在 URL 以 `https://meet.google.com/meet/` 开头的 Tab。Tab URL 通过主线程上的 `NSAppleScript.executeAndReturnError` 获取。
 
 两种应用条件同时成立时，优先选择 Zoom。会议状态从 false 变为 true 时，CLI 创建并启动一个 `MeetingRecorder`；会议状态变为 false 时，停止当前录音。监测状态读取失败时会输出 Warning，并保留当前录音状态。按 `Ctrl+C` 或 metrics 服务意外结束时，CLI 也会统一停止录音并完成文件收尾。
 
@@ -133,7 +135,7 @@ try await recorder.stop()
 
 `meta.json` 记录：
 
-- `trigger`：`microphone`、`zoom` 或 `google_chrome`；
+- `trigger`：`zoom` 或 `google_chrome`；
 - `started_at`：录音启动时间；
 - `ended_at`：停止录音时写入的结束时间；
 - `calendar_events`：所有匹配事件。每个事件包含标题、起止时间，以及可用的位置、描述和会议/日历 URL。

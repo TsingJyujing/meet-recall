@@ -49,14 +49,14 @@ enum TestLogging {
                 )
             }
         }
-        let trigger = try monitor.meetingTrigger(using: status, detectApp: false)
+        let trigger = try monitor.meetingTrigger(using: status, detectTab: false)
         logger.info("In meeting (microphone-only detection): \(trigger != nil)")
     } catch {
         logger.error("Could not inspect microphone status: \(error.localizedDescription)")
     }
 }
 
-@Test func microphoneOnlyTriggerUsesMicrophoneActivity() throws {
+@Test func microphoneActivityRequiresAllowedProcess() throws {
     guard #available(macOS 14.2, *) else { return }
 
     let monitor = MeetingStatusMonitor()
@@ -71,15 +71,28 @@ enum TestLogging {
             )
         ]
     )
+    let unrelatedStatus = MeetingStatusMonitor.MicrophoneStatus(
+        deviceName: "Test microphone",
+        isActive: true,
+        activeProcesses: [
+            MeetingStatusMonitor.RunningProcess(
+                processID: 456,
+                name: "Some other app",
+                executablePath: nil
+            )
+        ]
+    )
     let inactiveStatus = MeetingStatusMonitor.MicrophoneStatus(
         deviceName: "Test microphone",
         isActive: false,
         activeProcesses: []
     )
 
-    let activeTrigger = try monitor.meetingTrigger(using: activeStatus, detectApp: false)
-    let inactiveTrigger = try monitor.meetingTrigger(using: inactiveStatus, detectApp: false)
+    let activeTrigger = try monitor.meetingTrigger(using: activeStatus, detectTab: false)
+    let unrelatedTrigger = try monitor.meetingTrigger(using: unrelatedStatus, detectTab: false)
+    let inactiveTrigger = try monitor.meetingTrigger(using: inactiveStatus, detectTab: false)
 
-    #expect(activeTrigger?.rawValue == "microphone")
+    #expect(activeTrigger?.rawValue == "google_chrome")
+    #expect(unrelatedTrigger == nil)
     #expect(inactiveTrigger == nil)
 }
